@@ -2113,12 +2113,16 @@ function findHighestPriorityRoot() {
  * 2、调用performWork(NoWork, dl)，第一个参数为minExpirationTime这里传入NoWork=0，第二个参数是Deadline=dl。
  */
 function performAsyncWork(dl) {
-  if (dl.didTimeout) {
-    // The callback timed out. That means at least one update has expired.
+  if (dl.didTimeout) {  
+    // The callback timed out. That means at least one update has expired.   
     // Iterate through the root schedule. If they contain expired work, set
     // the next render expiration time to the current time. This has the effect
     // of flushing all expired work in a single batch, instead of flushing each
     // level one at a time.
+
+    // 回调超时。这意味着至少有一个更新已经过期。
+    // 遍历root，如果包含过期任务，将current time设置为下个过期任务的时间
+    // 这样做的效果是在一个批中刷新所有过期的工作，而不是一次刷新每个级别。
     if (firstScheduledRoot !== null) {
       recomputeCurrentRendererTime();
       let root: FiberRoot = firstScheduledRoot;
@@ -2154,8 +2158,12 @@ function performWork(minExpirationTime: ExpirationTime, dl: Deadline | null) {
   // 找到优先级最高的下一个需要渲染的root：nextFlushedRoot和对应的expirationTime：nextFlushedExpirationTime
   findHighestPriorityRoot();
 
+  // currentRendererTime 计算从页面加载到现在为止的毫秒数
+  // currentSchedulerTime 也是加载到现在的时间，isRendering === true 的时候用作固定值返回，不然每次 requestCurrentTime 都会重新计算新的时间
+
   // 异步
   if (deadline !== null) {
+    // 重新计算 currentRendererTime
     recomputeCurrentRendererTime();
     currentSchedulerTime = currentRendererTime;
 
@@ -2170,6 +2178,9 @@ function performWork(minExpirationTime: ExpirationTime, dl: Deadline | null) {
       nextFlushedExpirationTime !== NoWork &&
       (minExpirationTime === NoWork ||
         minExpirationTime >= nextFlushedExpirationTime) &&
+      // deadlineDidExpire 判断时间片是否过期，shouldYield 中判断
+      // 当前渲染时间 currentRendererTime 比较 nextFlushedExpirationTime 判断任务是否已经超时
+      // currentRendererTime >= nextFlushedExpirationTime 说明超时了
       (!deadlineDidExpire || currentRendererTime >= nextFlushedExpirationTime)
     ) {
       performWorkOnRoot(
@@ -2181,11 +2192,11 @@ function performWork(minExpirationTime: ExpirationTime, dl: Deadline | null) {
       recomputeCurrentRendererTime();
       currentSchedulerTime = currentRendererTime;
     }
-  } else {
+  } else {   // 同步
     while (
       nextFlushedRoot !== null &&
       nextFlushedExpirationTime !== NoWork &&
-      (minExpirationTime === NoWork ||
+      (minExpirationTime === NoWork ||    // 普通情况 minExpirationTime 应该就等于 nextFlushedExpirationTime，因为都来自同一个root，nextFlushedExpirationTime 是在 findHighestPriorityRoot 阶段读取出来的 root.expirationTime
         minExpirationTime >= nextFlushedExpirationTime)
     ) {
       performWorkOnRoot(nextFlushedRoot, nextFlushedExpirationTime, true);

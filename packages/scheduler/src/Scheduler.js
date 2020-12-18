@@ -138,6 +138,8 @@ function flushFirstCallback() {
   currentExpirationTime = expirationTime;
   var continuationCallback;
   try {
+    // deadlineObject 包含两个值：timeRemaining-当前帧还有多少空闲时间，didTimeout-任务是否过期
+    // 此处的callback是performAsyncWork,该函数没有任何返回值，所以下方的if判断不成立
     continuationCallback = callback(deadlineObject);
   } finally {
     currentPriorityLevel = previousPriorityLevel;
@@ -198,7 +200,7 @@ function flushImmediateWork() {
     // Confirm we've exited the outer most event handler
     currentEventStartTime === -1 &&
     firstCallbackNode !== null &&
-    firstCallbackNode.priorityLevel === ImmediatePriority
+    firstCallbackNode.priorityLevel === ImmediatePriority    // 该条件暂未发现成立的情况，所以if代码块不会执行
   ) {
     isExecutingCallback = true;
     deadlineObject.didTimeout = true;
@@ -232,7 +234,7 @@ function flushWork(didTimeout) {
   isExecutingCallback = true;
   deadlineObject.didTimeout = didTimeout;
   try {
-    if (didTimeout) {
+    if (didTimeout) {  // 已经过期，调用所有的已过期任务
       // Flush all the expired callbacks without yielding.
       while (firstCallbackNode !== null) {
         // Read the current time. Flush all the callbacks that expire at or
@@ -250,14 +252,14 @@ function flushWork(didTimeout) {
         }
         break;
       }
-    } else {
+    } else {   // 未过期，尽可能多的执行任务
       // Keep flushing callbacks until we run out of time in the frame.
       if (firstCallbackNode !== null) {
         do {
           flushFirstCallback();
         } while (
           firstCallbackNode !== null &&
-          getFrameDeadline() - getCurrentTime() > 0
+          getFrameDeadline() - getCurrentTime() > 0   // 这一帧是否还有剩余时间
         );
       }
     }
@@ -364,7 +366,7 @@ function unstable_scheduleCallback(callback, deprecated_options) {
   // by insertion. So the new callback is inserted any other callback with
   // equal expiration.
   /**
-   * 把任务按照过期时间拍好顺序，然后分两种情况去执行
+   * 把任务按照过期时间排好顺序，然后分两种情况去执行
    * 1、当添加第一个任务节点的时候开始启动任务执行；
    * 2、当新添加的任务取代之前的节点成为新的第一个节点的时候；
    * 因为1意味着任务从无到有，应该立刻启动。2意味着来了新的优先级最高的任务，应该停止掉之前要执行的任务，重新从新的任务开始执行。
@@ -373,7 +375,7 @@ function unstable_scheduleCallback(callback, deprecated_options) {
   /**
    * 核心思路就是 firstCallbackNode 优先级最高，lastCallbackNode 优先级最低
    * 新生成一个newNode之后，就从头开始比较优先级
-   * 如果新的高，就把新的往前插入，否则就往后插，直到没有一个node的优先级比他低
+   * 如果新的高，就把新的往前插入，否则就往后插，直到没有一个node的优先级比它低
    * 那么新的节点就变成 lastCallbackNode
    * 在改变了 firstCallbackNode 的情况下，需要重新调度
    */
@@ -482,6 +484,8 @@ var getCurrentTime;
 var ANIMATION_FRAME_TIMEOUT = 100;
 var rAFID;
 var rAFTimeoutID;
+
+
 // 调用requestAnimationFrame再加上设置了一个100ms的定时器，防止requestAnimationFrame太久不触发。
 // 该函数是解决网页选项卡如果在未激活状态下requestAnimationFrame不会被触发的问题，这样的话，调度器是可以在后台继续做调度的，一方面也能提升用户体验，同时后台执行的时间间隔是以100ms为步长，这个是一个最佳实践，100ms是不会影响用户体验同时也不影响CPU能耗的一个折中时间间隔
 
@@ -707,10 +711,10 @@ if (typeof window !== 'undefined' && window._schedMock) {
     // 第二次进来时已经是下一帧了，因为animationTick回调是在下一帧进行的，假如我们屏幕是60hz的刷新频率；
     // 那么一帧的时间为1000 / 60 ≈ 16（ms/帧）
     // 此时rafTime 为 rafTime + 16 = 5016；（上一帧的开始时间 + 实际上一帧的耗时时间）
-    // 此时nextFrameTime = （5000 + 16）- 5033 + 33 = 16；
+    // 此时 nextFrameTime = （5000 + 16）- 5033 + 33 = 16；
     // 第二次执行完，previousFrameTime = 16； frameDeadline = 5000 + 16 + 33 = 5049；
     // ------------------------------------------以下注释是第三次递归
-    // 第三次执行时，nextFrameTime = （5000 + 16 * 2）- 5049 + 33 = 16；
+    // 第三次执行时， nextFrameTime = （5000 + 16 * 2）- 5049 + 33 = 16；
     var nextFrameTime = rafTime - frameDeadline + activeFrameTime;
     // 这个if条件第一次肯定进不去
     //------------------------------------------以下注释是第二次递归
@@ -766,7 +770,7 @@ if (typeof window !== 'undefined' && window._schedMock) {
    * 3、如果任务没有过期，就等到有空的时候再执行，即交给requestAnimationFrameWithTimeout。
    */
   requestHostCallback = function(callback, absoluteTimeout) {
-    scheduledHostCallback = callback;
+    scheduledHostCallback = callback;    // scheduledHostCallback 值一般为flushWork，代表下一个调度要做的事情
     timeoutTime = absoluteTimeout;
     // isFlushingHostCallback 只在 channel.port1.onmessage 被设为 true；
     // isFlushingHostCallback 表示所添加的任务需要立即执行；
@@ -780,7 +784,7 @@ if (typeof window !== 'undefined' && window._schedMock) {
       // TODO: If this rAF doesn't materialize because the browser throttles, we
       // might want to still have setTimeout trigger rIC as a backup to ensure
       // that we keep performing work.
-      isAnimationFrameScheduled = true;
+      isAnimationFrameScheduled = true;   // isAnimationFrameScheduled 表示 是否已经开始调用requestAnimationFrame
       requestAnimationFrameWithTimeout(animationTick);
     }
   };
