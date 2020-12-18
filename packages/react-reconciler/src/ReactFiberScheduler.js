@@ -2311,7 +2311,7 @@ function performWorkOnRoot(
         // $FlowFixMe Complains noTimeout is not a TimeoutID, despite the check above
         cancelTimeout(timeoutHandle);
       }
-      const isYieldy = false;
+      const isYieldy = false;   //是否可以中断，false表示不可以中断（同步任务、异步已过期任务都要一次性完成，不可以中断）
       renderRoot(root, isYieldy, isExpired);
       finishedWork = root.finishedWork;
       if (finishedWork !== null) {
@@ -2338,10 +2338,10 @@ function performWorkOnRoot(
       const isYieldy = true;
       renderRoot(root, isYieldy, isExpired);
       finishedWork = root.finishedWork;
-      if (finishedWork !== null) {
+      if (finishedWork !== null) {    // 因为异步任务是可中断的，所以 finishedWork 有可能为null
         // We've completed the root. Check the deadline one more time
         // before committing.
-        if (!shouldYield()) {
+        if (!shouldYield()) {   // 时间片没有用完的情况
           // Still time left. Commit the root.
           completeRoot(root, finishedWork, expirationTime);
         } else {
