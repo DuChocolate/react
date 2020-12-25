@@ -70,7 +70,7 @@ import {ConcurrentMode, StrictMode} from './ReactTypeOfMode';
 import {
   shouldSetTextContent,
   shouldDeprioritizeSubtree,
-} from './ReactFiberHostConfig';
+} from './ReactFiberHostConfig';   //真实文件是ReactFiberHostConfig.dom.js
 import {pushHostContext, pushHostContainer} from './ReactFiberHostContext';
 import {
   pushProvider,
@@ -125,13 +125,17 @@ if (__DEV__) {
   didWarnAboutFunctionRefs = {};
 }
 
+/**
+ * 1、判断当前节点是否为null，如果是第一次渲染，current=null，则调用mountChildFibers，函数返回值赋给workInProgress.child；
+ * 2、current=null，说明是更新节点。调用reconcileChildFibers(workInProgress, current.child, nextChildren)，函数返回值赋值给workInProgress.child。
+ */
 export function reconcileChildren(
   current: Fiber | null,
   workInProgress: Fiber,
   nextChildren: any,
   renderExpirationTime: ExpirationTime,
 ) {
-  if (current === null) {
+  if (current === null) {   // 第一次渲染组件
     // If this is a fresh new component that hasn't been rendered yet, we
     // won't update its child set by applying minimal side-effects. Instead,
     // we will add them all to the child before it gets rendered. That means
@@ -142,7 +146,7 @@ export function reconcileChildren(
       nextChildren,
       renderExpirationTime,
     );
-  } else {
+  } else {   //更新组件
     // If the current child is the same as the work in progress, it means that
     // we haven't yet started any work on these children. Therefore, we use
     // the clone algorithm to create a copy of all the current children.
@@ -394,6 +398,12 @@ function markRef(current: Fiber | null, workInProgress: Fiber) {
   }
 }
 
+/**
+ * 1、调用函数，即业务中写好的函数组件。得到一个ReactElement，即nextChildren；
+ * 2、调用 reconcileChildren ，第一个参数 current=当前fiber节点。第二个参数 workInProgress=需要更新的fiber节点。第三个参数nextChildren，上面函数的返回值。
+ * 3、上面调用的reconcileChildren方法，其实是改变了workInProgress.child。
+ * 4、返回workInProgress.child。 
+ */
 function updateFunctionComponent(
   current,
   workInProgress,
@@ -409,14 +419,16 @@ function updateFunctionComponent(
   if (__DEV__) {
     ReactCurrentOwner.current = workInProgress;
     ReactCurrentFiber.setCurrentPhase('render');
-    nextChildren = Component(nextProps, context);
+    nextChildren = Component(nextProps, context);   
     ReactCurrentFiber.setCurrentPhase(null);
   } else {
+    // Component 组件方法，这里就是我们声明组件的方式 function(props, context){}
     nextChildren = Component(nextProps, context);
   }
 
   // React DevTools reads this flag.
   workInProgress.effectTag |= PerformedWork;
+  // 把 nextChildren 这些 ReactElement 变成 Fiber 对象，在workInProgress.child 挂载fiber。
   reconcileChildren(
     current,
     workInProgress,
@@ -426,6 +438,17 @@ function updateFunctionComponent(
   return workInProgress.child;
 }
 
+/**
+ * 这个函数的作用是对未初始化的类组件进行初始化，对已经初始化的组件更新重用。
+ * 
+ * 1、如果还没创建实例，初始化，说明是第一次渲染（instance === null），
+ *    调用constructClassInstance，执行构造函数，生成实例 instance，
+ *    然后再调用 mountClassInstance 挂载实例，主要工作是更新 instance.state，并且执行一些生命周期。
+ * 2、渲染被中断（instance !== null， current === null）调用resumeMountClassInstance复用实例但还是调用首次渲染的生命周期，这个函数如果反复 false 则组件无需更新。
+ * 3、更新渲染（instance !== null， current !== null）调用updateClassInstance，调用 didUpdate 和 componentWillReceiveProp 生命周期，这个函数如果反复false在则组件无需更新。
+ * 4、最终执行 finishClassComponent，进行错误判断的处理和判断是否可以跳过更新的过程，重新调和子节点 reconcileChildren。
+ * 
+ */
 function updateClassComponent(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -459,12 +482,17 @@ function updateClassComponent(
       workInProgress.effectTag |= Placement;
     }
     // In the initial pass we might need to construct the instance.
+    // 如果还没创建实例，初始化
+    // 执行构造函数，得到实例 instance
+    // workInProgress.stateNode = instance
     constructClassInstance(
       workInProgress,
       Component,
       nextProps,
       renderExpirationTime,
     );
+    // 挂载
+    // 主要工作是更新 instance.state， 并且执行一些生命周期
     mountClassInstance(
       workInProgress,
       Component,
@@ -472,7 +500,7 @@ function updateClassComponent(
       renderExpirationTime,
     );
     shouldUpdate = true;
-  } else if (current === null) {
+  } else if (current === null) {  // 渲染中断
     // In a resume, we'll already have an instance we can reuse.
     shouldUpdate = resumeMountClassInstance(
       workInProgress,
@@ -489,6 +517,7 @@ function updateClassComponent(
       renderExpirationTime,
     );
   }
+  // 完成 class 组件更新
   return finishClassComponent(
     current,
     workInProgress,
@@ -499,6 +528,15 @@ function updateClassComponent(
   );
 }
 
+/**
+ * 1、没更新也没错误捕获直接跳过，不会进行重新渲染；
+ * 2、有错误捕获，class 组件没有 getDerivedStateFromError, nextChildren = null;
+ * 3、有错误捕获，class 组件有 getDerivedStateFromError，直接执行 instance.render() 获得最新的 nextChildren，getDerivedStateFromError 在函数外 catch 到错误
+ *    并且执行立即更新为正确的state，所以可以执行 instance.render() 。
+ * 4、没错误捕获，执行nextChildren = instance.render();
+ * 5、有错误强行计算child进行调和，调用 forceUnmountCurrentAndReconcile；
+ * 6、正常情况直接调和子节点，调用 reconcileChildren。
+ */
 function finishClassComponent(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -512,6 +550,7 @@ function finishClassComponent(
 
   const didCaptureError = (workInProgress.effectTag & DidCapture) !== NoEffect;
 
+  // 没更新也没错误捕获直接跳过
   if (!shouldUpdate && !didCaptureError) {
     // Context providers should defer to sCU for rendering
     if (hasContext) {
@@ -530,6 +569,7 @@ function finishClassComponent(
   // Rerender
   ReactCurrentOwner.current = workInProgress;
   let nextChildren;
+  // 有错误捕获
   if (
     didCaptureError &&
     typeof Component.getDerivedStateFromError !== 'function'
@@ -539,6 +579,7 @@ function finishClassComponent(
     // re-render a fallback. This is temporary until we migrate everyone to
     // the new API.
     // TODO: Warn in a future release.
+    // class 组件没有 getDerivedStateFromError, nextChildren = null
     nextChildren = null;
 
     if (enableProfilerTimer) {
@@ -557,24 +598,29 @@ function finishClassComponent(
       }
       ReactCurrentFiber.setCurrentPhase(null);
     } else {
+      // class 组件有 getDerivedStateFromError，直接执行 instance.render() 获得最新的 nextChildren，
+      // getDerivedStateFromError 在函数外 catch 到错误并且执行立即更新为正确的 state ，所以可以执行 instance.render().
+      // 没捕获错误执行instance.render();
       nextChildren = instance.render();
     }
   }
 
   // React DevTools reads this flag.
   workInProgress.effectTag |= PerformedWork;
-  if (current !== null && didCaptureError) {
+  if (current !== null && didCaptureError) { // 不是第一次渲染 并且 有错误捕获
     // If we're recovering from an error, reconcile without reusing any of
     // the existing children. Conceptually, the normal children and the children
     // that are shown on error are two different sets, so we shouldn't reuse
     // normal children even if their identities match.
-    forceUnmountCurrentAndReconcile(
+    // 有错误强制计算 child 进行调和，调用 forceUnmountCurrentAndReconcile
+    forceUnmountCurrentAndReconcile( 
       current,
       workInProgress,
       nextChildren,
       renderExpirationTime,
     );
   } else {
+    // 正常情况直接调和子节点，调用 reconcileChildren
     reconcileChildren(
       current,
       workInProgress,
@@ -610,6 +656,13 @@ function pushHostRootContext(workInProgress) {
   pushHostContainer(workInProgress, root.containerInfo);
 }
 
+/**
+ * 这种情况只会出现在ReactDOM.render渲染的时候
+ * 1、调用 processUpdateQueue 得到新的 state;
+ * 2、nextChildren = nextState.element;
+ * 3、第一次渲染 mountChildFibers;
+ * 4、后续渲染 reconcileChildren。
+ */
 function updateHostRoot(current, workInProgress, renderExpirationTime) {
   pushHostRootContext(workInProgress);
   const updateQueue = workInProgress.updateQueue;
@@ -683,6 +736,11 @@ function updateHostRoot(current, workInProgress, renderExpirationTime) {
   return workInProgress.child;
 }
 
+/**
+ * 1、dom 标签内是纯文本 nextChildren 为 null,直接渲染文本内容；
+ * 2、判断 concurrentMode 异步组件是否有 hidden 属性，异步组件 hidden 永不更新；
+ * 3、最后进行 reconcileChildren。 
+ */
 function updateHostComponent(current, workInProgress, renderExpirationTime) {
   pushHostContext(workInProgress);
 
@@ -695,13 +753,14 @@ function updateHostComponent(current, workInProgress, renderExpirationTime) {
   const prevProps = current !== null ? current.memoizedProps : null;
 
   let nextChildren = nextProps.children;
-  const isDirectTextChild = shouldSetTextContent(type, nextProps);
+  const isDirectTextChild = shouldSetTextContent(type, nextProps);   // 判断节点的 children 是否是纯字符串
 
   if (isDirectTextChild) {
     // We special case a direct text child of a host node. This is a common
     // case. We won't handle it as a reified child. We will instead handle
     // this in the host environment that also have access to this prop. That
     // avoids allocating another HostText fiber and traversing it.
+    // dom 标签内是纯文本 nextChildren 为 null，直接渲染文本内容
     nextChildren = null;
   } else if (prevProps !== null && shouldSetTextContent(type, prevProps)) {
     // If we're switching from a direct text child to a normal child, or to
@@ -718,10 +777,12 @@ function updateHostComponent(current, workInProgress, renderExpirationTime) {
     shouldDeprioritizeSubtree(type, nextProps)
   ) {
     // Schedule this fiber to re-render at offscreen priority. Then bailout.
+    // 判断 concurrentMode 异步组件是否有 hidden 属性，异步组件 hidden 永不更新
     workInProgress.expirationTime = Never;
     return null;
   }
 
+  // 最后进行 reconcileChildren
   reconcileChildren(
     current,
     workInProgress,
@@ -731,6 +792,7 @@ function updateHostComponent(current, workInProgress, renderExpirationTime) {
   return workInProgress.child;
 }
 
+// 文本内容不需要构建 fiber 结构，直接在提交阶段更新就行了，所以直接 return null。
 function updateHostText(current, workInProgress) {
   if (current === null) {
     tryToClaimNextHydratableInstance(workInProgress);
@@ -898,14 +960,22 @@ function mountIncompleteClassComponent(
     renderExpirationTime,
   );
 }
-
-function mountIndeterminateComponent(
+/**
+ * 1、在函数 createFiberFromTypeAndProps 中，fiber 刚创建的时候 fiberTag 都为 IndeterminateComponent 类型，只有当 class 组件有 construct 才为 class 组件类型；
+ * 2、所以这个函数做以下判断：
+ *    符合 class 组件条件按 class 组件更新；
+ *    否则就按函数组件类型更新
+ * 
+ * 注：只存在于首次更新的时候，只有首次更新的时候不确定 fiberTag 类型。
+ * 
+ */
+function mountIndeterminateComponent(   // functionComponent 只有第一次渲染会调用该方法
   _current,
   workInProgress,
   Component,
   renderExpirationTime,
 ) {
-  if (_current !== null) {
+  if (_current !== null) {  // current !== null 说明是suspended组件
     // An indeterminate component only mounts if it suspended inside a non-
     // concurrent tree, in an inconsistent state. We want to tree it like
     // a new mount, even though an empty version of it already committed.
@@ -960,7 +1030,7 @@ function mountIndeterminateComponent(
     value !== null &&
     typeof value.render === 'function' &&
     value.$$typeof === undefined
-  ) {
+  ) {   // 以上条件都满足，说明该组件是个 classComponent
     // Proceed under the assumption that this is a class instance
     workInProgress.tag = ClassComponent;
 
@@ -1471,14 +1541,14 @@ function bailoutOnAlreadyFinishedWork(
   // Check if the children have any pending work.
   const childExpirationTime = workInProgress.childExpirationTime;
   if (
-    childExpirationTime === NoWork ||
-    childExpirationTime > renderExpirationTime
-  ) {
+    childExpirationTime === NoWork ||   // 子树没有更新
+    childExpirationTime > renderExpirationTime   // 子树更新优先级较低
+  ) {   // 直接跳过
     // The children don't have any work either. We can skip them.
     // TODO: Once we add back resuming, we should check if the children are
     // a work-in-progress set. If so, we need to transfer their effects.
     return null;
-  } else {
+  } else {  // 该fiber没有更新，但其子树有更新要执行，直接clone其子树
     // This fiber doesn't have work, but its subtree does. Clone the child
     // fibers and continue.
     cloneChildFibers(current, workInProgress);
@@ -1487,24 +1557,28 @@ function bailoutOnAlreadyFinishedWork(
 }
 
 function beginWork(
-  current: Fiber | null,
-  workInProgress: Fiber,
-  renderExpirationTime: ExpirationTime,
+  current: Fiber | null,    // current 是 workInProgress.alternate, 是fiber的替身，  current 一开始是RootFiber节点（也是个Fiber对象），它对应的tag是HostRoot
+  workInProgress: Fiber,  // workInProgress 是真实的 Fiber对象
+  renderExpirationTime: ExpirationTime,    // renderExpirationTime 是 FiberRoot.nextExpirationTimeToWorkOn;
 ): Fiber | null {
+  //fiber对象上的expirationTime表示自身更新的过期时间，而RootFiber上的expirationTime只有在调用ReactDOM.render的时候才会有值
   const updateExpirationTime = workInProgress.expirationTime;
 
+  // 只有调用ReactDOM.render的时候current是有值的，也就是说判断current是否为null相当于判断节点是不是第一次渲染，current !== null即第一次渲染
   if (current !== null) {
     const oldProps = current.memoizedProps;
     const newProps = workInProgress.pendingProps;
-    if (
-      oldProps === newProps &&
+    if (    // 判断 props 和 context 是否改变，判断当前 fiber 的优先级是否小于本次渲染的优先级，小于的话可以跳过
+      oldProps === newProps &&    //前后props一致
       !hasLegacyContextChanged() &&
-      (updateExpirationTime === NoWork ||
-        updateExpirationTime > renderExpirationTime)
-    ) {
+      (updateExpirationTime === NoWork ||   // 此节点没有更新
+        updateExpirationTime > renderExpirationTime)    //此节点有更新但是优先级较低
+    ) {   // 跳过，以下都是优化的过程
       // This fiber does not have any pending work. Bailout without entering
       // the begin phase. There's still some bookkeeping we that needs to be done
       // in this optimized path, mostly pushing stuff onto the stack.
+      // 通过 workInProgress.tag 判断当前是什么类型的节点
+      // workInProgress.tag 的所有类型定义在 ReactWorkTags.js 里面
       switch (workInProgress.tag) {
         case HostRoot:
           pushHostRootContext(workInProgress);
@@ -1578,6 +1652,8 @@ function beginWork(
           break;
         }
       }
+      // 该方法会帮助跳过该节点及子节点的更新
+      // bailoutOnAlreadyFinishedWork 会判断这个 fiber 的子树是否需要更新，如果需要更新会 clone 一份到 workInProgress.child 返回到 workLoop 的 nextUnitOfWork，否则为null
       return bailoutOnAlreadyFinishedWork(
         current,
         workInProgress,
@@ -1587,10 +1663,12 @@ function beginWork(
   }
 
   // Before entering the begin phase, clear the expiration time.
+  // 进行更新先把当前 fiber 的 expirationTime 设置为 NoWork
   workInProgress.expirationTime = NoWork;
 
+  // 根据 fiber 的 tag 类型进行更新
   switch (workInProgress.tag) {
-    case IndeterminateComponent: {
+    case IndeterminateComponent: {   // 不确定是函数组件还是类组件
       const elementType = workInProgress.elementType;
       return mountIndeterminateComponent(
         current,
@@ -1609,7 +1687,7 @@ function beginWork(
         renderExpirationTime,
       );
     }
-    case FunctionComponent: {
+    case FunctionComponent: {   // 函数组件
       const Component = workInProgress.type;
       const unresolvedProps = workInProgress.pendingProps;
       const resolvedProps =
@@ -1624,7 +1702,7 @@ function beginWork(
         renderExpirationTime,
       );
     }
-    case ClassComponent: {
+    case ClassComponent: {   // 类组件
       const Component = workInProgress.type;
       const unresolvedProps = workInProgress.pendingProps;
       const resolvedProps =
@@ -1639,11 +1717,11 @@ function beginWork(
         renderExpirationTime,
       );
     }
-    case HostRoot:
+    case HostRoot:    // 组件树根组件
       return updateHostRoot(current, workInProgress, renderExpirationTime);
-    case HostComponent:
+    case HostComponent:    // 标准dom节点
       return updateHostComponent(current, workInProgress, renderExpirationTime);
-    case HostText:
+    case HostText:   // 文本
       return updateHostText(current, workInProgress);
     case SuspenseComponent:
       return updateSuspenseComponent(

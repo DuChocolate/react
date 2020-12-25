@@ -438,7 +438,7 @@ export function processUpdateQueue<State>(
   let resultState = newBaseState;
   while (update !== null) {
     const updateExpirationTime = update.expirationTime;
-    if (updateExpirationTime > renderExpirationTime) {
+    if (updateExpirationTime > renderExpirationTime) {   // 该 update 的优先级低
       // This update does not have sufficient priority. Skip it.
       if (newFirstUpdate === null) {
         // This is the first skipped update. It will be the first update in
@@ -450,13 +450,13 @@ export function processUpdateQueue<State>(
       }
       // Since this update will remain in the list, update the remaining
       // expiration time.
-      if (
+      if (   // newExpirationTime 是未更新的 update 列表中最小的 
         newExpirationTime === NoWork ||
         newExpirationTime > updateExpirationTime
       ) {
         newExpirationTime = updateExpirationTime;
       }
-    } else {
+    } else {   // 该 update 优先级高，计算新的state
       // This update does have sufficient priority. Process it and compute
       // a new result.
       resultState = getStateFromUpdate(

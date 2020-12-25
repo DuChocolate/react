@@ -236,7 +236,12 @@ function warnOnFunctionType() {
 // to be able to optimize each path individually by branching early. This needs
 // a compiler or we can do it manually. Helpers that don't need this branching
 // live outside of this function.
+// shouldTrackSideEffects，他的作用是判断是否要增加一些effectTag，主要是用来优化初次渲染的。
 function ChildReconciler(shouldTrackSideEffects) {
+  /**
+   * deleteChild 标记删除
+   * 这里不是真正的删除，把childToDelete加入到Effect链表，记录effectTag为Deletion
+   */
   function deleteChild(returnFiber: Fiber, childToDelete: Fiber): void {
     if (!shouldTrackSideEffects) {
       // Noop.
@@ -247,7 +252,11 @@ function ChildReconciler(shouldTrackSideEffects) {
     // deletions, so we can just append the deletion to the list. The remaining
     // effects aren't added until the complete phase. Once we implement
     // resuming, this may not be true.
+    // 找到父组件中需要更新的最后一个子组件
     const last = returnFiber.lastEffect;
+    // 判断链表是否存在
+    // 这个链表的目的就是把该父节点上的所有需要更新的子节点通过链表链接起来
+    // 然后下次真正需要更新的时候只需要遍历链表即可
     if (last !== null) {
       last.nextEffect = childToDelete;
       returnFiber.lastEffect = childToDelete;
@@ -258,17 +267,19 @@ function ChildReconciler(shouldTrackSideEffects) {
     childToDelete.effectTag = Deletion;
   }
 
+  // 删除兄弟节点，一个个找到兄弟节点deleteChild
   function deleteRemainingChildren(
     returnFiber: Fiber,
     currentFirstChild: Fiber | null,
   ): null {
-    if (!shouldTrackSideEffects) {
+    if (!shouldTrackSideEffects) {   // 第一次渲染，没有子节点
       // Noop.
       return null;
     }
 
     // TODO: For the shouldClone case, this could be micro-optimized a bit by
     // assuming that after the first child we've already added everything.
+    // 单向链表操作
     let childToDelete = currentFirstChild;
     while (childToDelete !== null) {
       deleteChild(returnFiber, childToDelete);
@@ -332,13 +343,14 @@ function ChildReconciler(shouldTrackSideEffects) {
         // This item can stay in place.
         return oldIndex;
       }
-    } else {
+    } else {   // 说明该节点没有被渲染过 
       // This is an insertion.
       newFiber.effectTag = Placement;
       return lastPlacedIndex;
     }
   }
 
+  // 更新渲染时 placeSingleChild 会把新创建的 fiber 节点标记为 Placement，待到提交阶段处理，其中ReactElement，Portal，TextNode三种类型的节点需要进行处理。
   function placeSingleChild(newFiber: Fiber): Fiber {
     // This is simpler for the single child case. We only need to do a
     // placement for inserting new children.
@@ -729,6 +741,14 @@ function ChildReconciler(shouldTrackSideEffects) {
     return knownKeys;
   }
 
+  /**
+   * 1、用一个循环相同位置进行比较，找到第一个不可复用的节点为止，其中updateSlot函数用来判断新老节点是否可以复用；
+   * 2、新节点已经遍历完毕，直接把剩下的老节点删除就行了；
+   * 3、老节点已经遍历完毕，根据剩余新的节点直接创建Fiber；
+   * 4、移动的情况下进行节点复用：
+   *    把所有老数组元素按key或者是index放Map里；
+   *    遍历剩下的newChildren，找到Map里面可以复用的节点，如果找不到就创建。
+   */
   function reconcileChildrenArray(
     returnFiber: Fiber,
     currentFirstChild: Fiber | null,
@@ -770,6 +790,7 @@ function ChildReconciler(shouldTrackSideEffects) {
     let lastPlacedIndex = 0;
     let newIdx = 0;
     let nextOldFiber = null;
+    // 1、用一个循环相同位置进行比较，找到第一个不可复用的节点为止，其中updateSlot函数用来判断新老节点是否可以复用；
     for (; oldFiber !== null && newIdx < newChildren.length; newIdx++) {
       if (oldFiber.index > newIdx) {
         nextOldFiber = oldFiber;
@@ -777,12 +798,14 @@ function ChildReconciler(shouldTrackSideEffects) {
       } else {
         nextOldFiber = oldFiber.sibling;
       }
+      // 用于判断是否能复用，根据newChild的类型和oldChild.key 进行判断操作
       const newFiber = updateSlot(
         returnFiber,
         oldFiber,
         newChildren[newIdx],
         expirationTime,
       );
+      // 不能复用
       if (newFiber === null) {
         // TODO: This breaks on empty slots like null children. That's
         // unfortunate because it triggers the slow path all the time. We need
@@ -791,9 +814,14 @@ function ChildReconciler(shouldTrackSideEffects) {
         if (oldFiber === null) {
           oldFiber = nextOldFiber;
         }
+        // 跳出循环
         break;
       }
-      if (shouldTrackSideEffects) {
+      // 接下来都是可以复用fiber的逻辑
+      // shouldTrackSideEffects 代表更新组件
+      // 如果需要追踪副作用并且是重新创建了一个fiber的情况
+      // 那么会把oldFiber删掉
+      if (shouldTrackSideEffects) {  // 初次渲染的情况
         if (oldFiber && newFiber.alternate === null) {
           // We matched the slot, but we didn't reuse the existing fiber, so we
           // need to delete the existing child.
@@ -803,24 +831,28 @@ function ChildReconciler(shouldTrackSideEffects) {
       lastPlacedIndex = placeChild(newFiber, lastPlacedIndex, newIdx);
       if (previousNewFiber === null) {
         // TODO: Move out of the loop. This only happens for the first run.
+        // 是第一个节点
         resultingFirstChild = newFiber;
       } else {
         // TODO: Defer siblings if we're not at the right index for this slot.
         // I.e. if we had null values before, then we want to defer this
         // for each null value. However, we also don't want to call updateSlot
         // with the previous one.
+        // 链表连接新的fiber节点
         previousNewFiber.sibling = newFiber;
       }
       previousNewFiber = newFiber;
       oldFiber = nextOldFiber;
     }
 
+    // 2、新节点已经遍历完毕，直接把剩下的老节点删除就行了
     if (newIdx === newChildren.length) {
       // We've reached the end of the new children. We can delete the rest.
       deleteRemainingChildren(returnFiber, oldFiber);
       return resultingFirstChild;
     }
 
+    // 3、老节点已经遍历完毕，根据剩余新的节点直接创建 Fiber
     if (oldFiber === null) {
       // If we don't have any more existing children we can choose a fast path
       // since the rest will all be insertions.
@@ -846,9 +878,11 @@ function ChildReconciler(shouldTrackSideEffects) {
     }
 
     // Add all children to a key map for quick lookups.
+    // 把所有老数组元素按 key或者是inde放Map里
     const existingChildren = mapRemainingChildren(returnFiber, oldFiber);
 
     // Keep scanning and use the map to restore deleted items as moves.
+    // 遍历剩下的 newChildren，找到Map 里面可以复用的节点，如果找不到就创建
     for (; newIdx < newChildren.length; newIdx++) {
       const newFiber = updateFromMap(
         existingChildren,
@@ -879,6 +913,7 @@ function ChildReconciler(shouldTrackSideEffects) {
       }
     }
 
+    // 把不能复用的节点都删了
     if (shouldTrackSideEffects) {
       // Any existing children that weren't consumed above were deleted. We need
       // to add them to the deletion list.
@@ -1077,6 +1112,7 @@ function ChildReconciler(shouldTrackSideEffects) {
     return resultingFirstChild;
   }
 
+  // 文字节点的对比比较简单粗暴，直接找老的children中的第一个节点，如果是文字节点就复用，如果不是就删除全部老的节点，创建新的文字节点。
   function reconcileSingleTextNode(
     returnFiber: Fiber,
     currentFirstChild: Fiber | null,
@@ -1085,6 +1121,7 @@ function ChildReconciler(shouldTrackSideEffects) {
   ): Fiber {
     // There's no need to check for keys on text nodes since we don't have a
     // way to define them.
+    // 查找是否有可复用的节点
     if (currentFirstChild !== null && currentFirstChild.tag === HostText) {
       // We already have an existing node so let's just update it and delete
       // the rest.
@@ -1105,6 +1142,15 @@ function ChildReconciler(shouldTrackSideEffects) {
     return created;
   }
 
+  /**
+   * 调和单个子节点
+   * 1、通过key判断节点是否可以复用；
+   * 2、根据节点的不同创建不同的fiber对象，如果是 REACT_FRAGMENT_TYPE 类型通过createFiberFromFragment创建fiber对象，其他类型通过createFiberFromElement创建fiber对象；
+   * 3、createFiberFromElement -> createFiberFromTypeAndProps -> createFiber;
+   * 
+   * 注：这里调和单个子节点，如果key不存在为null，判断type和elementType来看他们是否是个组件函数。
+   * 
+   */
   function reconcileSingleElement(
     returnFiber: Fiber,
     currentFirstChild: Fiber | null,
@@ -1113,16 +1159,21 @@ function ChildReconciler(shouldTrackSideEffects) {
   ): Fiber {
     const key = element.key;
     let child = currentFirstChild;
+    // 此while循环的作用就是从所有子节点中寻找一个可以复用的旧子节点，并删除所有的兄弟节点；
+    // 如果找到可以复用的旧子节点，则复用，否则删除所有的子节点。
     while (child !== null) {
       // TODO: If key === null and child.key === null, then this only applies to
       // the first item in the list.
+      // 判断key是否相等，复用节点
       if (child.key === key) {
         if (
           child.tag === Fragment
             ? element.type === REACT_FRAGMENT_TYPE
             : child.elementType === element.type
         ) {
+          // key相等且type相等，删除旧子节点的兄弟节点，复用旧节点并返回（因此此次更新子节点只有一个，所以要删除兄弟节点）
           deleteRemainingChildren(returnFiber, child.sibling);
+          //创建fiber
           const existing = useFiber(
             child,
             element.type === REACT_FRAGMENT_TYPE
@@ -1138,15 +1189,19 @@ function ChildReconciler(shouldTrackSideEffects) {
           }
           return existing;
         } else {
+          // key相等但type不相等，删除旧子节点及兄弟节点，跳出循环
           deleteRemainingChildren(returnFiber, child);
           break;
         }
       } else {
+        // key不相等，删除此旧子节点，继续循环
         deleteChild(returnFiber, child);
       }
+      // 继续遍历此旧子节点的兄弟节点，找寻复用节点
       child = child.sibling;
     }
-
+    // 走到这表示所有的子节点都不能复用。则需要新建。
+    // 不能复用，则直接新建Fiber实例，并返回
     if (element.type === REACT_FRAGMENT_TYPE) {
       const created = createFiberFromFragment(
         element.props.children,
@@ -1162,7 +1217,7 @@ function ChildReconciler(shouldTrackSideEffects) {
         returnFiber.mode,
         expirationTime,
       );
-      created.ref = coerceRef(returnFiber, currentFirstChild, element);
+      created.ref = coerceRef(returnFiber, currentFirstChild, element);   // coerceRef 是 规范化ref，因为ref有三种形式，string ref要转换成方法
       created.return = returnFiber;
       return created;
     }
@@ -1215,9 +1270,28 @@ function ChildReconciler(shouldTrackSideEffects) {
   // This API will tag the children with the side-effect of the reconciliation
   // itself. They will be added to the side-effect list as we pass through the
   // children and the parent.
+  /**
+   * 1、这个方法第三个参数newChild即为我们调用函数组件返回的新的child；
+   * 2、判断newChild是什么类型的节点，不同类型对应不同的操作。比如newChild.$$typeof=REACT_ELEMENT_TYPE，则return placeSingleChild(reconcileSingleElement())。
+   *    如果是数组，调用reconcileChildrenArray()进行调和，还有可能是REACT_PORTAL_TYPE、string、number、Iterator等。
+   * 3、如果这个newChild上面的都不符合，但又是个对象却不是null，那么就是一个非法的定义了。就throwOnInvalidObjectType抛出错误。
+   * 4、最后，调用deleteRemainingChildren删除掉所有子节点。因为到了最后，只有可能newChild===null，说明新的更新情况掉了所有子节点。
+   * 
+   * 注：deleteRemainingChildren 这个函数里面调用deleteChild逐个删除，但删除子节点并不是真的删除这个对象，而是通过firstEffect、lastEffect、nextEffect属性来维护
+   * 一个EffectList（链表结构），通过effectTag标记当前删除操作，这些信息都会在commit阶段使用到。
+   * 
+   * 
+   * reconcileChildFibers 函数中主要是根据 newChild 类型，调用不同的Diff算法：
+   * 1、单个元素，调用reconcileSingleElement;
+   * 2、单个Portal元素，调用reconcileSinglePortal；
+   * 3、string或者number，调用reconcileSingleTextNode；
+   * 4、array（React 16新特性），调用reconcileChildrenArray；
+   * 前三种情况，在新子节点上添加effectTag：Placement，标记为更新操作，而这些操作的标记，将用于commit阶段。
+   * 
+   */
   function reconcileChildFibers(
     returnFiber: Fiber,
-    currentFirstChild: Fiber | null,
+    currentFirstChild: Fiber | null,   // 第一次渲染时是null
     newChild: any,
     expirationTime: ExpirationTime,
   ): Fiber | null {
@@ -1333,6 +1407,7 @@ function ChildReconciler(shouldTrackSideEffects) {
     }
 
     // Remaining cases are all treated as empty.
+    // 到这里说明返回值为null，删除所有的children。
     return deleteRemainingChildren(returnFiber, currentFirstChild);
   }
 

@@ -421,14 +421,14 @@ export function createFiberFromTypeAndProps(
 ): Fiber {
   let fiber;
 
-  let fiberTag = IndeterminateComponent;
+  let fiberTag = IndeterminateComponent;   // IndeterminateComponent表示不确定的一种组件类型，代码中有专门的处理逻辑
   // The resolved type is set if we know what the final type will be. I.e. it's not lazy.
   let resolvedType = type;
-  if (typeof type === 'function') {
+  if (typeof type === 'function') {   // function 和 class 组件的type都是function，所以内部使用shouldConstruct判断是否是class组件
     if (shouldConstruct(type)) {
       fiberTag = ClassComponent;
     }
-  } else if (typeof type === 'string') {
+  } else if (typeof type === 'string') {   // div、span等原生组件
     fiberTag = HostComponent;
   } else {
     getTag: switch (type) {
@@ -458,7 +458,7 @@ export function createFiberFromTypeAndProps(
       case REACT_SUSPENSE_TYPE:
         return createFiberFromSuspense(pendingProps, mode, expirationTime, key);
       default: {
-        if (typeof type === 'object' && type !== null) {
+        if (typeof type === 'object' && type !== null) {   // React.createRef、React.memo、React.createContext等创建的组件
           switch (type.$$typeof) {
             case REACT_PROVIDER_TYPE:
               fiberTag = ContextProvider;

@@ -1059,11 +1059,19 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
   return null;
 }
 
+/**
+ * 开始组件更新
+ * 
+ * 1、调用beginWork()更新当前任务节点；
+ * 2、如果当前fiber树已经更新到叶子节点了，则调用 completeUnitOfWork 更新
+ * 
+ */
 function performUnitOfWork(workInProgress: Fiber): Fiber | null {
   // The current, flushed, state of this fiber is the alternate.
   // Ideally nothing should rely on this, but relying on it here
   // means that we don't need an additional field on the work in
   // progress.
+  // 获取fiber的替身，调和这一阶段都是在替身上完成的
   const current = workInProgress.alternate;
 
   // See if beginning this work spawns more work.
@@ -1085,7 +1093,7 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
       startProfilerTimer(workInProgress);
     }
 
-    next = beginWork(current, workInProgress, nextRenderExpirationTime);
+    next = beginWork(current, workInProgress, nextRenderExpirationTime);  //beginWork 是每一个节点的更新
     workInProgress.memoizedProps = workInProgress.pendingProps;
 
     if (workInProgress.mode & ProfileMode) {
@@ -1111,6 +1119,7 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
     ReactFiberInstrumentation.debugTool.onBeginWork(workInProgress);
   }
 
+  // 当前fiber树已经更新到叶子节点了
   if (next === null) {
     // If this doesn't spawn new work, complete the current work.
     next = completeUnitOfWork(workInProgress);
@@ -1121,13 +1130,21 @@ function performUnitOfWork(workInProgress: Fiber): Fiber | null {
   return next;
 }
 
+/**
+ * 循环单元更新，对整棵fiberTree都遍历一遍
+ * isYieldy 为false表示不可中断，不断地更新下一个节点任务（performUnitOfWork(nextUnitOfWork)），直到整棵树更新完毕。
+ * isYieldy 为true表示可中断，通过shouldYield()判断当前帧是否还有时间更新，有时间就更新，没有时间就不更了。
+ * 
+ */
 function workLoop(isYieldy) {
-  if (!isYieldy) {
+  // 对 nextUnitOfWork 循环进行判断，直到没有 nextUnitOfWork
+  if (!isYieldy) {  // 不可中断
     // Flush work without yielding
     while (nextUnitOfWork !== null) {
+      // 一开始进来 nextUnitOfWork 是root， 每次执行 performUnitOfWork 后都会生成下一个工作单元
       nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
     }
-  } else {
+  } else {   // 可中断
     // Flush asynchronous work until the deadline runs out of time.
     while (nextUnitOfWork !== null && !shouldYield()) {
       nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
@@ -1135,6 +1152,12 @@ function workLoop(isYieldy) {
   }
 }
 
+/**
+ * 1、nextUnitOfWork = createWorkInProgress(）拷贝一份fiber节点，在nextUnitOfWork中修改，防止改变当前fiberTree。nextUnitOfWork是下一个要更新的节点。
+ * 2、进入workLoop。
+ * 
+ * 开始渲染整棵树，这个函数在异步模式下可能会被多次执行，因为在异步模式下可以打断任务。打断也就意味着每次都得回到root再开始从上往下循环。
+ */
 function renderRoot(
   root: FiberRoot,
   isYieldy: boolean,
@@ -1161,8 +1184,9 @@ function renderRoot(
     resetStack();
     nextRoot = root;
     nextRenderExpirationTime = expirationTime;
-    nextUnitOfWork = createWorkInProgress(
-      nextRoot.current,
+    // 获取下一个需要工作的单元
+    nextUnitOfWork = createWorkInProgress(   // nextUnitOfWork 是Fiber对象
+      nextRoot.current,   // FiberRoot 对应的 RootFiber
       null,
       nextRenderExpirationTime,
     );
@@ -1226,8 +1250,8 @@ function renderRoot(
 
   do {
     try {
-      workLoop(isYieldy);
-    } catch (thrownValue) {
+      workLoop(isYieldy);   // 循环更新节点
+    } catch (thrownValue) {   // 遇到错误的情况
       if (nextUnitOfWork === null) {
         // This is a fatal error.
         didFatal = true;
