@@ -57,7 +57,7 @@ import {
   createContainerChildSet,
   appendChildToContainerChildSet,
   finalizeContainerChildren,
-} from './ReactFiberHostConfig';
+} from './ReactFiberHostConfig';   //实际上是文件 'react-dom/src/client/ReactDOMHostConfig';
 import {
   getRootHostContainer,
   popHostContext,
@@ -93,6 +93,12 @@ let updateHostText;
 if (supportsMutation) {
   // Mutation mode
 
+  /**
+   * 因为我们是从下往上的，所以我们只需把我下面第一层子节点 append 到自己下面就好了。
+   * 1、对 node 的 sibling 兄弟节点进行遍历；
+   * 2、如果是 dom 原生节点或者是文本，直接 appendChild；
+   * 3、如果是其他节点但是有子节点，那么转而去遍历它的子节点，直到找到 dom 原生节点或者是文本。
+   */
   appendAllChildren = function(
     parent: Instance,
     workInProgress: Fiber,
@@ -103,6 +109,7 @@ if (supportsMutation) {
     // children to find all the terminal nodes.
     let node = workInProgress.child;
     while (node !== null) {
+      // 如果是 dom 原生节点或者是文本，直接 appendChild
       if (node.tag === HostComponent || node.tag === HostText) {
         appendInitialChild(parent, node.stateNode);
       } else if (node.tag === HostPortal) {
@@ -110,6 +117,7 @@ if (supportsMutation) {
         // down its children. Instead, we'll get insertions from each child in
         // the portal directly.
       } else if (node.child !== null) {
+        // 如果是其他节点但是有子节点，那么转而去遍历它的子节点，直到找到 dom 原生节点或者是文本。
         node.child.return = node;
         node = node.child;
         continue;
@@ -123,6 +131,7 @@ if (supportsMutation) {
         }
         node = node.return;
       }
+      // 对 node 的 sibling 兄弟节点进行遍历
       node.sibling.return = node.return;
       node = node.sibling;
     }
@@ -131,6 +140,13 @@ if (supportsMutation) {
   updateHostContainer = function(workInProgress: Fiber) {
     // Noop
   };
+  /**
+   * 1、调用 prepareUpdate 得到新老 props 比较后的结果；
+   * 2、把结果放到 workInProgress.updateQueue;
+   * 3、标记当前节点的 effect 为 UPDATE。
+   * 
+   * 注：比较后形成的结果是这样的：updatePayload：[k1, null, k2, v2, k3, v3]
+   */
   updateHostComponent = function(
     current: Fiber,
     workInProgress: Fiber,
@@ -140,6 +156,7 @@ if (supportsMutation) {
   ) {
     // If we have an alternate, that means this is an update and we need to
     // schedule a side-effect to do the updates.
+    // 之前的 oldProps
     const oldProps = current.memoizedProps;
     if (oldProps === newProps) {
       // In mutation mode, this is sufficient for a bailout because
@@ -151,12 +168,14 @@ if (supportsMutation) {
     // have newProps so we'll have to reuse them.
     // TODO: Split the update API as separate for the props vs. children.
     // Even better would be if children weren't special cased at all tho.
+    // 当前节点的 dom 对象
     const instance: Instance = workInProgress.stateNode;
     const currentHostContext = getHostContext();
     // TODO: Experiencing an error where oldProps is null. Suggests a host
     // component is hitting the resume path. Figure out why. Possibly
     // related to `hidden`.
-    const updatePayload = prepareUpdate(
+    // 得到新老 props 比较后的结果
+    const updatePayload = prepareUpdate(   //这个函数只是调用了 diffProperties 并且返回
       instance,
       type,
       oldProps,
@@ -165,13 +184,16 @@ if (supportsMutation) {
       currentHostContext,
     );
     // TODO: Type this specific to this type of component.
+    // 把结果放到 workInProgress.updateQueue
     workInProgress.updateQueue = (updatePayload: any);
     // If the update payload indicates that there is a change or if there
     // is a new ref we mark this as an update. All the work is done in commitWork.
     if (updatePayload) {
+      // 标记当前节点的 effect 为 UPDATE
       markUpdate(workInProgress);
     }
   };
+  // 该方法超级简单，直接比较文本是否相同
   updateHostText = function(
     current: Fiber,
     workInProgress: Fiber,
@@ -529,6 +551,10 @@ if (supportsMutation) {
   };
 }
 
+/**
+ * 函数根据 workInProgress.tag 对不同的类型节点做不同的处理，对大部分tag不进行操作或者只是 pop context，
+ * 只有 HostComponent、HostText、SuspenseComponent 有稍微复杂点的操作。
+ */
 function completeWork(
   current: Fiber | null,
   workInProgress: Fiber,
@@ -567,13 +593,22 @@ function completeWork(
         // TODO: Delete this when we delete isMounted and findDOMNode.
         workInProgress.effectTag &= ~Placement;
       }
-      updateHostContainer(workInProgress);
+      updateHostContainer(workInProgress);   // 浏览器环境中是个空方法
       break;
     }
+    /**
+     * tag 为 HostComponent 表示节点是普通 dom 节点，如div。
+     * 
+     * 针对 HostComponent 的操作简单概括：
+     * 1、createInstance：创建dom；
+     * 2、appendAllChildren: 将 children 的 host Component 添加到刚创建的 dom 上组成 dom 树；
+     * 3、finalizeInitialChildren: 给 dom 设置属性。
+     */
     case HostComponent: {
       popHostContext(workInProgress);
       const rootContainerInstance = getRootHostContainer();
       const type = workInProgress.type;
+      // 不是第一次渲染 并且 该节点已经被渲染过
       if (current !== null && workInProgress.stateNode != null) {
         updateHostComponent(
           current,
@@ -586,7 +621,7 @@ function completeWork(
         if (current.ref !== workInProgress.ref) {
           markRef(workInProgress);
         }
-      } else {
+      } else {   // 第一次渲染
         if (!newProps) {
           invariant(
             workInProgress.stateNode !== null,
@@ -617,7 +652,8 @@ function completeWork(
             // commit-phase we mark this as such.
             markUpdate(workInProgress);
           }
-        } else {
+        } else {   // 调用 ReactDOM.render() 的过程
+          // 创建 instance，就是创建 dom 节点对象，这个对象包含了 fiber 和 props 信息
           let instance = createInstance(
             type,
             newProps,
@@ -626,12 +662,14 @@ function completeWork(
             workInProgress,
           );
 
+          // 构建 dom 树，因为我们是从下往上的，所以我们只需把我下面第一层原生子节点 append 到自己下面就好了
           appendAllChildren(instance, workInProgress, false, false);
 
           // Certain renderers require commit-time effects for initial mount.
           // (eg DOM renderer supports auto-focus for certain elements).
           // Make sure such renderers get scheduled for later work.
           if (
+            // 设置属性，初始化事件监听
             finalizeInitialChildren(
               instance,
               type,
@@ -640,8 +678,10 @@ function completeWork(
               currentHostContext,
             )
           ) {
+            // 如果需要 auto focus，标记 effect 为 UPDATE
             markUpdate(workInProgress);
           }
+          // stateNode 指向创建好的 dom 节点
           workInProgress.stateNode = instance;
         }
 
@@ -652,9 +692,14 @@ function completeWork(
       }
       break;
     }
+    /**
+     * 1、更新的话，调用 updateHostText；
+     * 2、首次渲染的话，调用 createTextInstance。
+     */
     case HostText: {
       let newText = newProps;
       if (current && workInProgress.stateNode != null) {
+        // 更新
         const oldText = current.memoizedProps;
         // If we have an alternate, that means this is an update and we need
         // to schedule a side-effect to do the updates.
@@ -676,6 +721,7 @@ function completeWork(
             markUpdate(workInProgress);
           }
         } else {
+          // 首次渲染
           workInProgress.stateNode = createTextInstance(
             newText,
             rootContainerInstance,

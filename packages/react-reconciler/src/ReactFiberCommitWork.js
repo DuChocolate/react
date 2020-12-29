@@ -180,6 +180,12 @@ function safelyDetachRef(current: Fiber) {
   }
 }
 
+/**
+ * 该方法做的主要事情：
+ * 1、在 class 组件中通过 prevProps、prevState 获取状态快照，用于 componentDidUpdate 生命周期；
+ * 2、状态快照的获取通过 getSnapshotBeforeUpdate 生命周期执行后的返回值 
+ * commitBeforeMutationLifeCycles 中只有在更新任务是 classComponent 时才有工作。
+ */
 function commitBeforeMutationLifeCycles(
   current: Fiber | null,
   finishedWork: Fiber,
@@ -188,12 +194,17 @@ function commitBeforeMutationLifeCycles(
     case ClassComponent: {
       if (finishedWork.effectTag & Snapshot) {
         if (current !== null) {
+          // 不是初次加载
+          // 组件初次加载执行 DidMount 生命周期函数不走 DidUpdate 不需要保存快照对象
           const prevProps = current.memoizedProps;
           const prevState = current.memoizedState;
           startPhaseTimer(finishedWork, 'getSnapshotBeforeUpdate');
+          // 得到当前 class 组件的实例
           const instance = finishedWork.stateNode;
+          // 更新实例上的 props 和 state
           instance.props = finishedWork.memoizedProps;
           instance.state = finishedWork.memoizedState;
+          // 调用 getSnapshotBeforeUpdate 生命周期方法
           const snapshot = instance.getSnapshotBeforeUpdate(
             prevProps,
             prevState,
@@ -212,6 +223,7 @@ function commitBeforeMutationLifeCycles(
               );
             }
           }
+          // 保存到 instance.__reactInternalSnapshotBeforeUpdate 给 DidUpdate 生命周期方法使用
           instance.__reactInternalSnapshotBeforeUpdate = snapshot;
           stopPhaseTimer();
         }
@@ -641,28 +653,38 @@ function isHostParent(fiber: Fiber): boolean {
     fiber.tag === HostPortal
   );
 }
-
+/**
+ * 这个函数其实是找我要插入的节点（finishedWork）的下一个 dom 节点，因为要插在这个节点前面。
+ * 所以这个函数做的事情就是：剔除掉所有的非原始 dom 节点，找到我想要的 dom 节点。
+ * 注：HostPortal 也是要被剔除的，因为它不是挂载在这个地方的。
+ */
 function getHostSibling(fiber: Fiber): ?Instance {
   // We're going to search forward into the tree until we find a sibling host
   // node. Unfortunately, if multiple insertions are done in a row we have to
   // search past them. This leads to exponential search for the next sibling.
   // TODO: Find a more efficient way to do this.
   let node: Fiber = fiber;
+  // 外层 while 循环
   siblings: while (true) {
     // If we didn't find anything, let's try the next sibling.
+    // 如果没有兄弟节点，向上查找父节点，但是这个父节点不能是原生 dom 节点
     while (node.sibling === null) {
       if (node.return === null || isHostParent(node.return)) {
         // If we pop out of the root or hit the parent the fiber we are the
         // last sibling.
+        // 如果到了根结点 root 了或者是原生 dom 节点，返回 null 说明在真实的 dom 中插入的这个节点没有兄弟节点
         return null;
       }
       node = node.return;
     }
+    // 下面是有兄弟节点的情况
     node.sibling.return = node.return;
     node = node.sibling;
+    // 兄弟节点不是 HostComponent 也不是 HostText
     while (node.tag !== HostComponent && node.tag !== HostText) {
       // If it is not host node and, we might have a host node inside it.
       // Try to search down until we find one.
+      // 兄弟节点也是将要插入的节点，跳过这个节点查找下一个兄弟节点
       if (node.effectTag & Placement) {
         // If we don't have a child, try the siblings instead.
         continue siblings;
@@ -683,19 +705,29 @@ function getHostSibling(fiber: Fiber): ?Instance {
     }
   }
 }
-
+/**
+ * 1、找到 finishedWork 的父节点 parentFiber。寻找的是原生的 dom 节点对应的 fiber。如果父级不是原生 dom，则继续往上寻找。
+ * 2、得到 parentFiber 对应的原生 dom 节点 parent；
+ * 3、找到插入节点的后一个节点，因为需要插在它前面；
+ * 4、用 insertBefore 或者 appendChild 进行子节点插入操作。
+ * 
+ * 注：第4步插入操作需要分情况，比如如果是原生 dom 节点是直接插入，如果是 Class 子节点是需要深度优先遍历子节点进行插入的。
+ */
 function commitPlacement(finishedWork: Fiber): void {
   if (!supportsMutation) {
     return;
   }
 
   // Recursively insert all host nodes into the parent.
+  // 找到 finishedWork 的父节点 parentFiber。寻找的是原生的 dom 节点对应的 fiber。如果父级不是原生 dom，则继续往上寻找。
+  // 所以 parentFiber 只有三种类型的节点： HostComponent、HostRoot、HostPortal。
   const parentFiber = getHostParentFiber(finishedWork);
 
   // Note: these two variables *must* always be updated together.
   let parent;
   let isContainer;
 
+  // 得到原生 dom 节点：parent
   switch (parentFiber.tag) {
     case HostComponent:
       parent = parentFiber.stateNode;
@@ -723,19 +755,24 @@ function commitPlacement(finishedWork: Fiber): void {
     parentFiber.effectTag &= ~ContentReset;
   }
 
+  // 这里操作 dom 使用的是 insertBefore 原生 api
+  // 所以需要得到插入节点的后一个节点，因为要插在它前面
   const before = getHostSibling(finishedWork);
   // We only have the top Fiber that was inserted but we need recurse down its
   // children to find all the terminal nodes.
   let node: Fiber = finishedWork;
   while (true) {
+    // 如果当前节点是原生 dom 节点就直接进行插入
     if (node.tag === HostComponent || node.tag === HostText) {
       if (before) {
+        // 有 before 就用 insertBefore
         if (isContainer) {
           insertInContainerBefore(parent, node.stateNode, before);
         } else {
           insertBefore(parent, node.stateNode, before);
         }
       } else {
+        // 没有 before 就用 appendChild
         if (isContainer) {
           appendChildToContainer(parent, node.stateNode);
         } else {
@@ -743,17 +780,24 @@ function commitPlacement(finishedWork: Fiber): void {
         }
       }
     } else if (node.tag === HostPortal) {
+      // 是 HostPortal 直接跳过，因为不是插在这里的
       // If the insertion itself is a portal, then we don't want to traverse
       // down its children. Instead, we'll get insertions from each child in
       // the portal directly.
     } else if (node.child !== null) {
+      // 上面条件不满足其实就是 class 组件
+      // 查看子节点是否存在，存在的话把子节点进行插入 continue
       node.child.return = node;
       node = node.child;
       continue;
     }
     if (node === finishedWork) {
+      // 对 finishedWork 已经结束
       return;
     }
+    // 其实这是一个深度优先遍历
+    // 深度优先遍历 class 组件的子节点，把 class 组件的原生 dom 节点全部进行插入操作
+    // 下面是深度优先遍历的退回过程，如果没有兄弟节点，就往上退回。
     while (node.sibling === null) {
       if (node.return === null || node.return === finishedWork) {
         return;

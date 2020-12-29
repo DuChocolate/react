@@ -575,6 +575,14 @@ export function setInitialProperties(
 }
 
 // Calculate the diff between the two objects.
+/**
+ * 1、根据不同标签节点提取新老 props 准备比较；
+ * 2、第一次遍历老 props，把要删除的属性都设置为 null；
+ * 3、第二次遍历新 props，把新的 props push 到 updatePayload；
+ * 4、最后生成 updatePayload：[k1, null, k2, v2, k3, v3]。
+ * 
+ * 注： 这里不同的属性会有不同的特殊处理，比如 STYLE 的话，就需要展开处理等等。
+ */
 export function diffProperties(
   domElement: Element,
   tag: string,
@@ -590,6 +598,7 @@ export function diffProperties(
 
   let lastProps: Object;
   let nextProps: Object;
+  // 1、根据不同标签节点提取新老props 准备比较
   switch (tag) {
     case 'input':
       lastProps = ReactDOMInput.getHostProps(domElement, lastRawProps);
@@ -626,14 +635,15 @@ export function diffProperties(
 
   assertValidProps(tag, nextProps);
 
+  // 2、第一次遍历老 props，把要删除的属性都设置为 null；
   let propKey;
   let styleName;
   let styleUpdates = null;
   for (propKey in lastProps) {
-    if (
-      nextProps.hasOwnProperty(propKey) ||
-      !lastProps.hasOwnProperty(propKey) ||
-      lastProps[propKey] == null
+    if (  // 如果不符合这个判断就删除
+      nextProps.hasOwnProperty(propKey) ||   // 如果新 props 有该属性
+      !lastProps.hasOwnProperty(propKey) ||  // 如果老 props 没有该属性
+      lastProps[propKey] == null   // 如果老 props 中该属性值为 null
     ) {
       continue;
     }
@@ -669,6 +679,7 @@ export function diffProperties(
       (updatePayload = updatePayload || []).push(propKey, null);
     }
   }
+  // 3、第二次遍历新 props，把新的 props push 到 updatePayload；
   for (propKey in nextProps) {
     const nextProp = nextProps[propKey];
     const lastProp = lastProps != null ? lastProps[propKey] : undefined;
@@ -768,6 +779,7 @@ export function diffProperties(
   if (styleUpdates) {
     (updatePayload = updatePayload || []).push(STYLE, styleUpdates);
   }
+  // 4、最后生成 updatePayload：[key1, value1, key2, value2],[k1, null, k2, v2, k3, v3]。
   return updatePayload;
 }
 

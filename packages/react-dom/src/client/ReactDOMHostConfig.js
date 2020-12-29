@@ -162,12 +162,16 @@ export function resetAfterCommit(containerInfo: Container): void {
   eventsEnabled = null;
 }
 
+/**
+ * 1、创建 dom 节点；
+ * 2、在 dom 节点对象上记录此次创建的 fiber 和 props 信息。
+ */
 export function createInstance(
   type: string,
   props: Props,
   rootContainerInstance: Container,
   hostContext: HostContext,
-  internalInstanceHandle: Object,
+  internalInstanceHandle: Object,   // 传入的当前节点的 workInProgress
 ): Instance {
   let parentNamespace: string;
   if (__DEV__) {
@@ -189,13 +193,17 @@ export function createInstance(
   } else {
     parentNamespace = ((hostContext: any): HostContextProd);
   }
+  // 创建 dom 节点
   const domElement: Instance = createElement(
     type,
     props,
     rootContainerInstance,
     parentNamespace,
   );
+  // 给 domElement[__reactInternalInstance$] = internalInstanceHandle。
+  // 也就是指向了对应的 fiber 节点
   precacheFiberNode(internalInstanceHandle, domElement);
+  // domElement[__reactEventHandlers$] = props;
   updateFiberProps(domElement, props);
   return domElement;
 }
@@ -207,6 +215,10 @@ export function appendInitialChild(
   parentInstance.appendChild(child);
 }
 
+/**
+ * 主要是设置 dom 元素的一些初始值。在设置初始值的时候对应不同的 dom 元素有特殊的处理。
+ * 这里处理都是在 setInitialProperties 函数中。
+ */
 export function finalizeInitialChildren(
   domElement: Instance,
   type: string,
@@ -214,10 +226,13 @@ export function finalizeInitialChildren(
   rootContainerInstance: Container,
   hostContext: HostContext,
 ): boolean {
+  // 把 props 对应的应该在 dom 节点上展示的 attributes，如何挂载到 dom，还有一些事件监听相关。
   setInitialProperties(domElement, type, props, rootContainerInstance);
+  // 是否需要 auto focus
   return shouldAutoFocusHostComponent(type, props);
 }
 
+// 该函数只是调用了 diffProperties 并且返回
 export function prepareUpdate(
   domElement: Instance,
   type: string,
@@ -267,6 +282,7 @@ export function shouldDeprioritizeSubtree(type: string, props: Props): boolean {
   return !!props.hidden;
 }
 
+// 方法很简单，就是创建了一个 TextNode 文本节点。以及给 textElement[__reactInternalInstance$] = internalInstanceHandle = 当前的 fiber 节点。
 export function createTextInstance(
   text: string,
   rootContainerInstance: Container,

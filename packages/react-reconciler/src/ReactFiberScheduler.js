@@ -379,7 +379,12 @@ function resetStack() {
   nextUnitOfWork = null;
 }
 
+/**
+ * 1、遍历 effect 链表中；
+ * 2、不同的 effectTag，执行不同的操作，比如重置文本节点，执行插入（commitPlacement）、更新（commitWork）、删除（commitDeletion）等的 effect 操作，真正的对 dom 进行修改。
+ */
 function commitAllHostEffects() {
+  // 遍历 effect 链
   while (nextEffect !== null) {
     if (__DEV__) {
       ReactCurrentFiber.setCurrentFiber(nextEffect);
@@ -388,6 +393,7 @@ function commitAllHostEffects() {
 
     const effectTag = nextEffect.effectTag;
 
+    // 重置文本节点
     if (effectTag & ContentReset) {
       commitResetTextContent(nextEffect);
     }
@@ -406,23 +412,28 @@ function commitAllHostEffects() {
     let primaryEffectTag = effectTag & (Placement | Update | Deletion);
     switch (primaryEffectTag) {
       case Placement: {
+        // 插入节点
         commitPlacement(nextEffect);
         // Clear the "placement" from effect tag so that we know that this is inserted, before
         // any life-cycles like componentDidMount gets called.
         // TODO: findDOMNode doesn't rely on this any more but isMounted
         // does and isMounted is deprecated anyway so we should be able
         // to kill this.
+        // 删除 effectTag
         nextEffect.effectTag &= ~Placement;
         break;
       }
       case PlacementAndUpdate: {
         // Placement
+        // 插入并且更新
+        // 插入节点
         commitPlacement(nextEffect);
         // Clear the "placement" from effect tag so that we know that this is inserted, before
         // any life-cycles like componentDidMount gets called.
         nextEffect.effectTag &= ~Placement;
 
         // Update
+        // 更新节点
         const current = nextEffect.alternate;
         commitWork(current, nextEffect);
         break;
@@ -433,6 +444,7 @@ function commitAllHostEffects() {
         break;
       }
       case Deletion: {
+        // 删除节点
         commitDeletion(nextEffect);
         break;
       }
@@ -444,7 +456,7 @@ function commitAllHostEffects() {
     ReactCurrentFiber.resetCurrentFiber();
   }
 }
-
+// 遍历 effect 链，在这个循环中，组件的 state 已经更新，但是节点还没有更新
 function commitBeforeMutationLifecycles() {
   while (nextEffect !== null) {
     if (__DEV__) {
@@ -455,6 +467,7 @@ function commitBeforeMutationLifecycles() {
     if (effectTag & Snapshot) {
       recordEffect();
       const current = nextEffect.alternate;
+      // 这里调用的是另一个方法
       commitBeforeMutationLifeCycles(current, nextEffect);
     }
 
@@ -526,6 +539,13 @@ function markLegacyErrorBoundaryAsFailed(instance: mixed) {
   }
 }
 
+/**
+ * 1、检查 finishedWork 是否也有 effect，如有插入 effect 链表中；
+ * 2、第一次遍历 effect 链，更新 class 组件实例上的 state、props，执行 getSnapshotBeforeUpdate 生命周期；
+ * 3、第二次遍历 effect 链，不同的 effectTag，执行不同的操作，比如重置文本节点，执行插入、更新、删除等的 effect 操作，真正的对 dom 进行修改。
+ * 4、第三次遍历 effect 链，这次遍历就是做一些收尾工作。执行 componentDidMount、componentDidUpdate，更新的回调函数等。
+ * 5、做一些还原变量等的收尾工作。
+ */
 function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   isWorking = true;
   isCommitting = true;
@@ -569,6 +589,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   // Reset this to null before calling lifecycles
   ReactCurrentOwner.current = null;
 
+  // 检查 finishedWork 是否也有 effect，如有插入 effect 链表中
   let firstEffect;
   if (finishedWork.effectTag > PerformedWork) {
     // A fiber's effect list consists only of its children, not itself. So if
@@ -591,6 +612,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   // Invoke instances of getSnapshotBeforeUpdate before mutation.
   nextEffect = firstEffect;
   startCommitSnapshotEffectsTimer();
+  // 第一次遍历
   while (nextEffect !== null) {
     let didError = false;
     let error;
@@ -634,6 +656,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   // ref unmounts.
   nextEffect = firstEffect;
   startCommitHostEffectsTimer();
+  // 第二次遍历
   while (nextEffect !== null) {
     let didError = false;
     let error;
@@ -680,6 +703,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
   // This pass also triggers any renderer-specific initial effects.
   nextEffect = firstEffect;
   startCommitLifeCyclesTimer();
+  // 第三次遍历
   while (nextEffect !== null) {
     let didError = false;
     let error;
@@ -716,6 +740,7 @@ function commitRoot(root: FiberRoot, finishedWork: Fiber): void {
     }
   }
 
+  // 下面做一些还原变量等的收尾工作
   isCommitting = false;
   isWorking = false;
   stopCommitLifeCyclesTimer();
@@ -881,7 +906,11 @@ function resetChildExpirationTime(
 
   workInProgress.childExpirationTime = newChildExpirationTime;
 }
-
+/**
+ * 1、判断是否中断调用不同的处理方法；
+ * 2、判断是否有兄弟节点来执行不同的操作；
+ * 3、完成节点之后赋值effect链。
+ */
 function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
   // Attempt to complete the current unit of work, then move to the
   // next sibling. If there are no more siblings, return to the
@@ -899,6 +928,7 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
     const returnFiber = workInProgress.return;
     const siblingFiber = workInProgress.sibling;
 
+    // 没有错误捕获，正常的渲染逻辑
     if ((workInProgress.effectTag & Incomplete) === NoEffect) {
       // This fiber completed.
       if (enableProfilerTimer) {
@@ -906,6 +936,7 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
           startProfilerTimer(workInProgress);
         }
 
+        // 完成节点的更新
         nextUnitOfWork = completeWork(
           current,
           workInProgress,
@@ -924,20 +955,23 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         );
       }
       stopWorkTimer(workInProgress);
-      resetChildExpirationTime(workInProgress, nextRenderExpirationTime);
+      resetChildExpirationTime(workInProgress, nextRenderExpirationTime);   //重置 childExpirationTime
       if (__DEV__) {
         ReactCurrentFiber.resetCurrentFiber();
       }
 
+      // 构建 effect 链，供 commitRoot 提交阶段使用
       if (
         returnFiber !== null &&
         // Do not append effects to parents if a sibling failed to complete
-        (returnFiber.effectTag & Incomplete) === NoEffect
+        (returnFiber.effectTag & Incomplete) === NoEffect   // 父节点没有错误
       ) {
         // Append all the effects of the subtree and this fiber onto the effect
         // list of the parent. The completion order of the children affects the
         // side-effect order.
-        if (returnFiber.firstEffect === null) {
+        // 把自己身上的 effect 链粘在父节点的 effect 后面
+        // 将当前节点的 firstEffect-lastEffect 的链表 挂载在父节点的 firstEffect-lastEffect 的链表中
+        if (returnFiber.firstEffect === null) {   //说明该节点还没记录任何有副作用的子节点
           returnFiber.firstEffect = workInProgress.firstEffect;
         }
         if (workInProgress.lastEffect !== null) {
@@ -956,6 +990,7 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         const effectTag = workInProgress.effectTag;
         // Skip both NoWork and PerformedWork tags when creating the effect list.
         // PerformedWork effect is read by React DevTools but shouldn't be committed.
+        // 发现自己本身也有 effect，那么要把自己也加入父节点的 effect 链上
         if (effectTag > PerformedWork) {
           if (returnFiber.lastEffect !== null) {
             returnFiber.lastEffect.nextEffect = workInProgress;
@@ -970,15 +1005,18 @@ function completeUnitOfWork(workInProgress: Fiber): Fiber | null {
         ReactFiberInstrumentation.debugTool.onCompleteWork(workInProgress);
       }
 
+      // 有兄弟节点返回兄弟节点，继续走 beginwork
       if (siblingFiber !== null) {
         // If there is more work to do in this returnFiber, do that next.
-        return siblingFiber;
+        return siblingFiber;   // 跳出循环
       } else if (returnFiber !== null) {
+        // 没有兄弟节点找父节点
         // If there's no more work in this returnFiber. Complete the returnFiber.
         workInProgress = returnFiber;
         continue;
       } else {
         // We've reached the root.
+        // 一直向上或者向右找兄弟节点，找到 null 到达 root 顶点结束，更新阶段完成，准备进入 commitRoot 阶段
         return null;
       }
     } else {
@@ -1255,7 +1293,7 @@ function renderRoot(
       if (nextUnitOfWork === null) {
         // This is a fatal error.
         didFatal = true;
-        onUncaughtError(thrownValue);
+        onUncaughtError(thrownValue);   // 致命错误，直接中断渲染流程
       } else {
         if (__DEV__) {
           // Reset global debug state
@@ -1280,7 +1318,7 @@ function renderRoot(
 
         const sourceFiber: Fiber = nextUnitOfWork;
         let returnFiber = sourceFiber.return;
-        if (returnFiber === null) {
+        if (returnFiber === null) {  // 说明是在更新 rootFiber 节点
           // This is the root. The root could capture its own errors. However,
           // we don't know if it errors before or after we pushed the host
           // context. This information is needed to avoid a stack mismatch.
@@ -1297,12 +1335,12 @@ function renderRoot(
             thrownValue,
             nextRenderExpirationTime,
           );
-          nextUnitOfWork = completeUnitOfWork(sourceFiber);
+          nextUnitOfWork = completeUnitOfWork(sourceFiber);  // 节点报错就直接completeUnitOfWork，不再渲染其子节点
           continue;
         }
       }
     }
-    break;
+    break;   //此处 break，直接跳出了 while 循环
   } while (true);
 
   if (enableSchedulerTracing) {

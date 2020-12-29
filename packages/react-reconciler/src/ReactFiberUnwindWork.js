@@ -153,7 +153,7 @@ function throwException(
   // Its effect list is no longer valid.
   sourceFiber.firstEffect = sourceFiber.lastEffect = null;
 
-  if (
+  if (   // suspensed 组件
     value !== null &&
     typeof value === 'object' &&
     typeof value.then === 'function'
@@ -321,7 +321,7 @@ function throwException(
   // We didn't find a boundary that could handle this type of exception. Start
   // over and traverse parent path again, this time treating the exception
   // as an error.
-  renderDidError();
+  renderDidError();   // 设置 nextRenderDidError = true; 
   value = createCapturedValue(value, sourceFiber);
   let workInProgress = returnFiber;
   do {
