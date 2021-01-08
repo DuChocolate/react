@@ -409,7 +409,7 @@ function commitAllHostEffects() {
     // updates, and deletions. To avoid needing to add a case for every
     // possible bitmap value, we remove the secondary effects from the
     // effect tag and switch on that value.
-    let primaryEffectTag = effectTag & (Placement | Update | Deletion);
+    let primaryEffectTag = effectTag & (Placement | Update | Deletion);  // Placement-新增，Update-更新，Deletion-删除。
     switch (primaryEffectTag) {
       case Placement: {
         // 插入节点
@@ -481,6 +481,13 @@ function commitBeforeMutationLifecycles() {
   }
 }
 
+/**
+ * 第三次遍历就是做一些收尾工作：
+ * 1、首次渲染执行 componentDidMount;
+ * 2、更新渲染执行 componentDidUpdate;
+ * 3、执行 setState 的 callback 回调函数;
+ * 4、清空 commitUpdateQueue。
+ */
 function commitAllLifeCycles(
   finishedRoot: FiberRoot,
   committedExpirationTime: ExpirationTime,
@@ -493,9 +500,11 @@ function commitAllLifeCycles(
       ReactStrictModeWarnings.flushPendingDeprecationWarnings();
     }
   }
+  // 循环 effect 链
   while (nextEffect !== null) {
     const effectTag = nextEffect.effectTag;
 
+    // 有更新或者有回调函数
     if (effectTag & (Update | Callback)) {
       recordEffect();
       const current = nextEffect.alternate;

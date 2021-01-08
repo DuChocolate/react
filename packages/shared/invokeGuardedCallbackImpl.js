@@ -58,6 +58,10 @@ if (__DEV__) {
   ) {
     const fakeNode = document.createElement('react');
 
+    /**
+     * 使用该函数代替 try ... catch 的主要原因是为了防止浏览器 DevTool 的pause on any exception功能导致 React 渲染因为出现错误被中断，而导致渲染不出内容。
+     * 因为 React 现在是可以捕获错误并且在错误的时候渲染对应的 UI 的，但是浏览器的这个功能甚至可以让被try catch捕获的错误也停在错误出现的地方，对 React 开发的体验不是很好。
+     */
     const invokeGuardedCallbackDev = function<A, B, C, D, E, F, Context>(
       name: string | null,
       func: (a: A, b: B, c: C, d: D, e: E, f: F) => mixed,

@@ -247,6 +247,9 @@ function commitBeforeMutationLifeCycles(
   }
 }
 
+/**
+ * 这个方法会执行 componentDidMount 或者 componentDidUpdate 生命周期方法，最后调用 commitUpdateQueue。
+ */
 function commitLifeCycles(
   finishedRoot: FiberRoot,
   current: Fiber | null,
@@ -258,12 +261,14 @@ function commitLifeCycles(
       const instance = finishedWork.stateNode;
       if (finishedWork.effectTag & Update) {
         if (current === null) {
+          // 首次渲染
           startPhaseTimer(finishedWork, 'componentDidMount');
           instance.props = finishedWork.memoizedProps;
           instance.state = finishedWork.memoizedState;
           instance.componentDidMount();
           stopPhaseTimer();
         } else {
+          // 组件更新
           const prevProps = current.memoizedProps;
           const prevState = current.memoizedState;
           startPhaseTimer(finishedWork, 'componentDidUpdate');
@@ -304,6 +309,7 @@ function commitLifeCycles(
               break;
           }
         }
+        // 因为ReactDOM.render也有回调函数，所以也要调用commitUpdateQueue。
         commitUpdateQueue(
           finishedWork,
           updateQueue,
@@ -323,6 +329,7 @@ function commitLifeCycles(
       if (current === null && finishedWork.effectTag & Update) {
         const type = finishedWork.type;
         const props = finishedWork.memoizedProps;
+        // 这个函数只是对 input 标签有 auto-focus 的情况进行处理
         commitMount(instance, type, props, finishedWork);
       }
 
@@ -504,19 +511,27 @@ function commitDetachRef(current: Fiber) {
 // User-originating errors (lifecycles and refs) should not interrupt
 // deletion, so don't let them throw. Host-originating errors should
 // interrupt deletion, so it's okay
+/**
+ * 这个方法会对不同的节点做不同的处理，对ClassComponent会执行它的生命周期以及卸载ref，
+ * 对HostComponent卸载ref，对HostPortal重新调用unmountHostComponents，这里我们就明白了为什么上一个方法（commitNestedUnmounts）遇到HostPortal就停止了对它的子树的遍历，
+ * 因为他会重新递归调用unmountHostComponents遍历子树。
+ */
 function commitUnmount(current: Fiber): void {
   onCommitUnmount(current);
 
   switch (current.tag) {
     case ClassComponent: {
+      // 卸载ref
       safelyDetachRef(current);
       const instance = current.stateNode;
+      // 执行WillUnmount方法，这个时候真实dom还没有卸载，即将卸载
       if (typeof instance.componentWillUnmount === 'function') {
         safelyCallComponentWillUnmount(current, instance);
       }
       return;
     }
     case HostComponent: {
+      // 卸载ref
       safelyDetachRef(current);
       return;
     }
@@ -525,6 +540,7 @@ function commitUnmount(current: Fiber): void {
       // We are also not using this parent because
       // the portal will get pushed immediately.
       if (supportsMutation) {
+        // 递归调用，遍历子树
         unmountHostComponents(current);
       } else if (supportsPersistence) {
         emptyPortalContainer(current);
@@ -534,6 +550,11 @@ function commitUnmount(current: Fiber): void {
   }
 }
 
+/**
+ * 这个方法使用深度优先遍历整棵dom节点为父节点的树。子节点还有可能是react组件或者HostPortal。
+ * 这里对每个节点都要调用commitUnmount。
+ * 如果遇到了HostPortal就会停止对它下面的子树进行遍历，因为在commitUnmount中会对HostPortal类型有个特殊的处理。
+ */
 function commitNestedUnmounts(root: Fiber): void {
   // While we're inside a removed host node we don't want to call
   // removeChild on the inner nodes because they're removed by the top
@@ -551,6 +572,7 @@ function commitNestedUnmounts(root: Fiber): void {
       // If we don't use mutation we drill down into portals here instead.
       (!supportsMutation || node.tag !== HostPortal)
     ) {
+      // 如果是HostPortal就直接跳过子树的遍历，所以下面不执行
       node.child.return = node;
       node = node.child;
       continue;
@@ -654,7 +676,7 @@ function isHostParent(fiber: Fiber): boolean {
   );
 }
 /**
- * 这个函数其实是找我要插入的节点（finishedWork）的下一个 dom 节点，因为要插在这个节点前面。
+ * 这个方法用来找到当前要执行插入的节点的现有的第一个右侧节点，如果这个方法返回null，则会直接调用parent.appendChild。
  * 所以这个函数做的事情就是：剔除掉所有的非原始 dom 节点，找到我想要的 dom 节点。
  * 注：HostPortal 也是要被剔除的，因为它不是挂载在这个地方的。
  */
@@ -667,7 +689,7 @@ function getHostSibling(fiber: Fiber): ?Instance {
   // 外层 while 循环
   siblings: while (true) {
     // If we didn't find anything, let's try the next sibling.
-    // 如果没有兄弟节点，向上查找父节点，但是这个父节点不能是原生 dom 节点
+    // 如果没有兄弟节点，向上查找父节点，但是这个父节点可能不是原生 dom 节点
     while (node.sibling === null) {
       if (node.return === null || isHostParent(node.return)) {
         // If we pop out of the root or hit the parent the fiber we are the
@@ -694,11 +716,14 @@ function getHostSibling(fiber: Fiber): ?Instance {
       if (node.child === null || node.tag === HostPortal) {
         continue siblings;
       } else {
+        // 否则返回兄弟节点的子节点
         node.child.return = node;
         node = node.child;
       }
     }
     // Check if this host node is stable or about to be placed.
+    // 如果兄弟节点也是新增节点，寻找下一个兄弟节点
+    // 否则，就找到了
     if (!(node.effectTag & Placement)) {
       // Found it!
       return node.stateNode;
@@ -756,7 +781,9 @@ function commitPlacement(finishedWork: Fiber): void {
   }
 
   // 这里操作 dom 使用的是 insertBefore 原生 api
-  // 所以需要得到插入节点的后一个节点，因为要插在它前面
+  // 这个方法用来找到当前要执行插入的节点的现有的第一个右侧节点，可能存在于
+  // 1、父链中任一节点的右侧节点的子树中的第一个HostComponent
+  // 2、他的右侧兄弟节点或者子树中的第一个HostComponent
   const before = getHostSibling(finishedWork);
   // We only have the top Fiber that was inserted but we need recurse down its
   // children to find all the terminal nodes.
@@ -823,6 +850,7 @@ function unmountHostComponents(current): void {
   let currentParentIsContainer;
 
   while (true) {
+    // 找到父节点，这个父节点一定是个dom节点
     if (!currentParentIsValid) {
       let parent = node.return;
       findParent: while (true) {
@@ -851,6 +879,7 @@ function unmountHostComponents(current): void {
     }
 
     if (node.tag === HostComponent || node.tag === HostText) {
+      // 如果是原生dom节点
       commitNestedUnmounts(node);
       // After all the children have unmounted, it is now safe to remove the
       // node from the tree.
@@ -861,6 +890,7 @@ function unmountHostComponents(current): void {
       }
       // Don't visit children because we already visited them.
     } else if (node.tag === HostPortal) {
+      // 如果是HostPortal不会做什么操作，直接向下遍历子节点，因为它没有ref，也没有生命周期
       // When we go into a portal, it becomes the parent to remove from.
       // We will reassign it back when we pop the portal on the way up.
       currentParent = node.stateNode.containerInfo;
@@ -872,17 +902,21 @@ function unmountHostComponents(current): void {
         continue;
       }
     } else {
+      // 到这里的话，其实就是react组件节点了，调用commitUnmount，这个方法里会有生命周期的调用，ref的卸载
       commitUnmount(node);
       // Visit children because we may find more host components below.
+      // 继续遍历子节点
       if (node.child !== null) {
         node.child.return = node;
         node = node.child;
         continue;
       }
     }
+    // 整棵树遍历完成
     if (node === current) {
       return;
     }
+    // 如果没有兄弟节点，深度优先遍历可以向父节点返回了
     while (node.sibling === null) {
       if (node.return === null || node.return === current) {
         return;
@@ -894,11 +928,18 @@ function unmountHostComponents(current): void {
         currentParentIsValid = false;
       }
     }
+    // 到这里代表已经没有子节点了，就向兄弟节点方向遍历
     node.sibling.return = node.return;
     node = node.sibling;
   }
 }
-
+/**
+ * 在删除一个节点的时候，并不是直接删除那么简单。
+ * 在删除一个节点的时候，需要去遍历整棵子树。
+ * 第一，如果dom节点下面还有class组件，那么我们是要调用它的生命周期方法的（componentWillUnmount），
+ * 第二，如果有HostPortal，那么还要去删除HostPortal中的节点，所以我们必须要遍历子树。
+ * 这里的遍历采用树的深度优先遍历。
+ */
 function commitDeletion(current: Fiber): void {
   if (supportsMutation) {
     // Recursively delete all host nodes from the parent.
@@ -911,6 +952,11 @@ function commitDeletion(current: Fiber): void {
   detachFiber(current);
 }
 
+/**
+ * 1、commitWork 只会更新 HostComponent（dom节点）和 HostText（文本节点）；
+ * 2、HostComponent 调用 commitUpdate 更新；
+ * 3、HostText 调用 commitTextUpdate 更新。
+ */
 function commitWork(current: Fiber | null, finishedWork: Fiber): void {
   if (!supportsMutation) {
     commitContainer(finishedWork);
@@ -932,6 +978,7 @@ function commitWork(current: Fiber | null, finishedWork: Fiber): void {
         const oldProps = current !== null ? current.memoizedProps : newProps;
         const type = finishedWork.type;
         // TODO: Type the updateQueue to be specific to host components.
+        // updatePayload 是数组格式，[key1, val1, key2, val2]
         const updatePayload: null | UpdatePayload = (finishedWork.updateQueue: any);
         finishedWork.updateQueue = null;
         if (updatePayload !== null) {

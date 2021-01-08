@@ -587,6 +587,10 @@ export function checkHasForceUpdateAfterProcessing(): boolean {
   return hasForceUpdate;
 }
 
+/**
+ * 1、调用 commitUpdateEffects；
+ * 2、清空 commitUpdateQueue。
+ */
 export function commitUpdateQueue<State>(
   finishedWork: Fiber,
   finishedQueue: UpdateQueue<State>,
@@ -597,6 +601,9 @@ export function commitUpdateQueue<State>(
   // lower priority updates left over, we need to keep the captured updates
   // in the queue so that they are rebased and not dropped once we process the
   // queue again at the lower priority.
+  // 如果有低优先级的任务，则让本次渲染捕获的更新放到低优先级的任务上渲染；
+  // 这里的假设是当前节点上低优先级的任务可能可以处理捕获的任务；
+  // 如果没有低优先级的任务，则清除本次捕获的更新。
   if (finishedQueue.firstCapturedUpdate !== null) {
     // Join the captured update list to the end of the normal list.
     if (finishedQueue.lastUpdate !== null) {
@@ -615,6 +622,7 @@ export function commitUpdateQueue<State>(
   finishedQueue.firstCapturedEffect = finishedQueue.lastCapturedEffect = null;
 }
 
+// 调用 effect 上的回调函数
 function commitUpdateEffects<State>(
   effect: Update<State> | null,
   instance: any,
